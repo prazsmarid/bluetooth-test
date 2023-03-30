@@ -30,20 +30,24 @@
 #include "esp_gatt_common_api.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h" //ads
 
 #define GATTC_TAG "GATTC_DEMO"
-#define REMOTE_SERVICE_UUID        0x00FF
-#define REMOTE_NOTIFY_CHAR_UUID    0xFF01
+#define REMOTE_SERVICE_UUID        0xFFE3 //edit
+#define REMOTE_NOTIFY_CHAR_UUID    0xFFE5 //edit
 #define PROFILE_NUM      1
 #define PROFILE_A_APP_ID 0
 #define INVALID_HANDLE   0
 
-static const char remote_device_name[] = "ESP_GATTS_DEMO";
+uint8_t write_data[] = { 0x7e, 0xff, 0x05 }; //add
+bool is_connect = false;//add
+static bool can_send_write = false;//add
+
+static const char remote_device_name[] = "BT-F1";//edit
 static bool connect    = false;
 static bool get_server = false;
 static esp_gattc_char_elem_t *char_elem_result   = NULL;
 static esp_gattc_descr_elem_t *descr_elem_result = NULL;
-
 /* Declare static functions */
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
@@ -106,6 +110,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         }
         break;
     case ESP_GATTC_CONNECT_EVT:{
+		is_connect = true;
+
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
         gl_profile_tab[PROFILE_A_APP_ID].conn_id = p_data->connect.conn_id;
         memcpy(gl_profile_tab[PROFILE_A_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
@@ -308,6 +314,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         get_server = false;
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
         break;
+		
     default:
         break;
     }
@@ -434,8 +441,39 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
     } while (0);
 }
 
+//add:
+void writeBufferToBLE(uint8_t tx_data_length){ // uint8_t write_data[] is the buffer
+            
+				ESP_LOGI(GATTC_TAG, "--writeBufferToBLE--");
+                if (is_connect) {
+					ESP_LOGI(GATTC_TAG, "---------------is_connect--------------------");
+                    int free_buff_num = esp_ble_get_cur_sendable_packets_num(gl_profile_tab[PROFILE_A_APP_ID].conn_id);
+                    if(free_buff_num > 0) {
+                        esp_ble_gattc_write_char(gl_profile_tab[PROFILE_A_APP_ID].gattc_if,
+                                                            gl_profile_tab[PROFILE_A_APP_ID].conn_id,
+                                                            gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                                                            tx_data_length, write_data,
+                                                            ESP_GATT_WRITE_TYPE_NO_RSP,
+                                                            ESP_GATT_AUTH_REQ_NONE);							
+                        //}						
+						ESP_LOGI(GATTC_TAG, "Wrote this: %02X, %02X, %02X", write_data[0], write_data[1], write_data[2]);
+                    } else { //Add the vTaskDelay to prevent this task from consuming the CPU all the time, causing low-priority tasks to not be executed at all.
+                        vTaskDelay( 10 / portTICK_PERIOD_MS );
+                    }
+                }
+				else{
+					ESP_LOGI(GATTC_TAG, "--Connection lost, rebooting--");
+					esp_restart();
+				}
+            
+
+}
+
 void app_main(void)
-{
+{   for (int i = 4; i >= 0; i--) {
+        printf("Starting in %d seconds...\n", i);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
     // Initialize NVS.
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -493,5 +531,8 @@ void app_main(void)
     if (local_mtu_ret){
         ESP_LOGE(GATTC_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-
+	printf("--delay started--\n");
+	vTaskDelay(2000 / portTICK_PERIOD_MS );//add: 1000 tick delay
+	printf("--delay ended--\n");
+	writeBufferToBLE(2);
 }
